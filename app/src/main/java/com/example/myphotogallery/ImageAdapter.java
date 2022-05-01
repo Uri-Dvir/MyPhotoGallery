@@ -2,6 +2,8 @@ package com.example.myphotogallery;
 
 import android.app.Activity;
 import android.content.Intent;
+import android.net.Uri;
+import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -10,9 +12,41 @@ import androidx.annotation.NonNull;
 import androidx.core.app.ActivityOptionsCompat;
 import androidx.recyclerview.widget.RecyclerView;
 
+import com.bumptech.glide.Glide;
+import com.google.android.gms.tasks.OnFailureListener;
+import com.google.android.gms.tasks.OnSuccessListener;
+import com.google.firebase.storage.FirebaseStorage;
+import com.google.firebase.storage.ListResult;
+import com.google.firebase.storage.StorageReference;
+import com.google.firebase.storage.UploadTask;
+
+import java.io.File;
+import java.util.ArrayList;
+import java.util.List;
+
 public class ImageAdapter extends RecyclerView.Adapter<ImageViewHolder> {
 
-    private int[] images = {R.drawable.a1,R.drawable.a2,R.drawable.a3,R.drawable.a4,R.drawable.a5};
+    private List<String> images;
+
+    public ImageAdapter()
+    {
+        images = new ArrayList<String>();
+        StorageReference storageRef = FirebaseStorage.getInstance().getReference();
+        storageRef.listAll().addOnSuccessListener(new OnSuccessListener<ListResult>() {
+            @Override
+            public void onSuccess(ListResult listResult) {
+                for (StorageReference item : listResult.getItems()) {
+                   item.getDownloadUrl().addOnSuccessListener(new OnSuccessListener<Uri>() {
+                       @Override
+                       public void onSuccess(Uri uri) {
+                           images.add(uri.toString());
+                           notifyDataSetChanged();
+                       }
+                   });
+                }
+            }
+        });
+    }
 
     @NonNull
     @Override
@@ -24,8 +58,8 @@ public class ImageAdapter extends RecyclerView.Adapter<ImageViewHolder> {
 
     @Override
     public void onBindViewHolder(@NonNull ImageViewHolder holder, int position) {
-        int image = images[position];
-        holder.image.setImageResource(image);
+        String image = images.get(position);
+        Glide.with(holder.image.getContext()).load(image).into(holder.image);
         holder.image.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
@@ -43,6 +77,14 @@ public class ImageAdapter extends RecyclerView.Adapter<ImageViewHolder> {
 
     @Override
     public int getItemCount() {
-        return images.length;
+        return images.size();
+    }
+
+    public void addImage(String path) {
+        images.add(path);
+        notifyDataSetChanged();
+        Uri file = Uri.fromFile(new File(path));
+        StorageReference storageRef = FirebaseStorage.getInstance().getReference();
+        storageRef.child(file.getLastPathSegment()).putFile(file);
     }
 }
