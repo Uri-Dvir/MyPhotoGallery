@@ -9,12 +9,22 @@ import android.view.View;
 import android.view.ViewGroup;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 import androidx.core.app.ActivityOptionsCompat;
 import androidx.recyclerview.widget.RecyclerView;
 
 import com.bumptech.glide.Glide;
+import com.google.android.gms.auth.api.signin.GoogleSignInAccount;
+import com.google.android.gms.tasks.OnCompleteListener;
 import com.google.android.gms.tasks.OnFailureListener;
 import com.google.android.gms.tasks.OnSuccessListener;
+import com.google.android.gms.tasks.Task;
+import com.google.firebase.firestore.DocumentSnapshot;
+import com.google.firebase.firestore.EventListener;
+import com.google.firebase.firestore.FirebaseFirestore;
+import com.google.firebase.firestore.FirebaseFirestoreException;
+import com.google.firebase.firestore.QueryDocumentSnapshot;
+import com.google.firebase.firestore.QuerySnapshot;
 import com.google.firebase.storage.FirebaseStorage;
 import com.google.firebase.storage.ListResult;
 import com.google.firebase.storage.StorageReference;
@@ -22,28 +32,54 @@ import com.google.firebase.storage.UploadTask;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 public class ImageAdapter extends RecyclerView.Adapter<ImageViewHolder> {
 
-    private List<String> images;
+    private List<Image> images;
+    GoogleSignInAccount account;
 
-    public ImageAdapter()
-    {
-        images = new ArrayList<String>();
-        StorageReference storageRef = FirebaseStorage.getInstance().getReference();
-        storageRef.listAll().addOnSuccessListener(new OnSuccessListener<ListResult>() {
+    public ImageAdapter() {
+        images = new ArrayList<Image>();
+        FirebaseFirestore db = FirebaseFirestore.getInstance();
+        db.collection("Images").get().addOnCompleteListener(new OnCompleteListener<QuerySnapshot>() {
             @Override
-            public void onSuccess(ListResult listResult) {
-                for (StorageReference item : listResult.getItems()) {
-                   item.getDownloadUrl().addOnSuccessListener(new OnSuccessListener<Uri>() {
-                       @Override
-                       public void onSuccess(Uri uri) {
-                           images.add(uri.toString());
-                           notifyDataSetChanged();
-                       }
-                   });
+            public void onComplete(@NonNull Task<QuerySnapshot> task) {
+                if (task.isSuccessful()) {
+                    images = new ArrayList<>();
+                    for (QueryDocumentSnapshot document : task.getResult())
+                    {
+                        try {
+                            Image i = new Image(
+                                    document.getId(),
+                                    document.get("URL").toString()
+                            );
+                            images.add(i);
+                        } catch (Exception e) {
+                        }
+                    }
+                    notifyDataSetChanged();
                 }
+            }
+        });
+        db.collection("Images").addSnapshotListener(new EventListener<QuerySnapshot>() {
+            @Override
+            public void onEvent(@Nullable QuerySnapshot value, @Nullable FirebaseFirestoreException error) {
+                images = new ArrayList<>();
+                for (DocumentSnapshot document : value.getDocuments())
+                {
+                    try {
+                        Image i = new Image(
+                                document.getId(),
+                                document.get("URL").toString()
+                        );
+                        images.add(i);
+                    } catch (Exception e) {
+                    }
+                }
+                notifyDataSetChanged();
             }
         });
     }
@@ -58,13 +94,14 @@ public class ImageAdapter extends RecyclerView.Adapter<ImageViewHolder> {
 
     @Override
     public void onBindViewHolder(@NonNull ImageViewHolder holder, int position) {
-        String image = images.get(position);
-        Glide.with(holder.image.getContext()).load(image).into(holder.image);
+        Image image = images.get(position);
+        Glide.with(holder.image.getContext()).load(image.URL).into(holder.image);
         holder.image.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
                 Intent i = new Intent(view.getContext(),FullImageActivity.class);
                 i.putExtra("image",image);
+                i.putExtra("user",account);
                 ActivityOptionsCompat options =
                         ActivityOptionsCompat.makeSceneTransitionAnimation((Activity) view.getContext(),
                                 holder.image,
@@ -81,10 +118,26 @@ public class ImageAdapter extends RecyclerView.Adapter<ImageViewHolder> {
     }
 
     public void addImage(String path) {
-        images.add(path);
-        notifyDataSetChanged();
         Uri file = Uri.fromFile(new File(path));
         StorageReference storageRef = FirebaseStorage.getInstance().getReference();
-        storageRef.child(file.getLastPathSegment()).putFile(file);
+        storageRef.child(file.getLastPathSegment()).putFile(file).addOnSuccessListener(new OnSuccessListener<UploadTask.TaskSnapshot>() {
+            @Override
+            public void onSuccess(UploadTask.TaskSnapshot taskSnapshot) {
+                storageRef.child(file.getLastPathSegment()).getDownloadUrl().addOnSuccessListener(new OnSuccessListener<Uri>() {
+                    @Override
+                    public void onSuccess(Uri uri) {
+                        Map<String, Object> image = new HashMap<>();
+                        image.put("URL", uri.toString());
+                        FirebaseFirestore db = FirebaseFirestore.getInstance();
+                        db.collection("Images").document(String.valueOf(System.currentTimeMillis()))
+                                .set(image);
+                    }
+                });
+            }
+        });
+    }
+
+    public void setAccount(GoogleSignInAccount account) {
+        this.account = account;
     }
 }
